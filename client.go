@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -45,7 +46,7 @@ func New(secretAPIKey, apiKey string) *Client {
 func (c *Client) Ping(ctx context.Context) (string, error) {
 	endpoint := c.BaseURL.JoinPath("ping")
 
-	respBody, err := c.do(ctx, endpoint, nil)
+	respBody, err := c.Do(ctx, endpoint, nil)
 	if err != nil {
 		return "", err
 	}
@@ -73,7 +74,7 @@ func (c *Client) Ping(ctx context.Context) (string, error) {
 func (c *Client) CreateRecord(ctx context.Context, domain string, record Record) (int, error) {
 	endpoint := c.BaseURL.JoinPath("dns", "create", domain)
 
-	respBody, err := c.do(ctx, endpoint, record)
+	respBody, err := c.Do(ctx, endpoint, record)
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +102,7 @@ func (c *Client) CreateRecord(ctx context.Context, domain string, record Record)
 func (c *Client) EditRecord(ctx context.Context, domain string, id int, record Record) error {
 	endpoint := c.BaseURL.JoinPath("dns", "edit", domain, strconv.Itoa(id))
 
-	respBody, err := c.do(ctx, endpoint, record)
+	respBody, err := c.Do(ctx, endpoint, record)
 	if err != nil {
 		return err
 	}
@@ -123,7 +124,7 @@ func (c *Client) EditRecord(ctx context.Context, domain string, id int, record R
 func (c *Client) DeleteRecord(ctx context.Context, domain string, id int) error {
 	endpoint := c.BaseURL.JoinPath("dns", "delete", domain, strconv.Itoa(id))
 
-	respBody, err := c.do(ctx, endpoint, nil)
+	respBody, err := c.Do(ctx, endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -145,7 +146,7 @@ func (c *Client) DeleteRecord(ctx context.Context, domain string, id int) error 
 func (c *Client) RetrieveRecords(ctx context.Context, domain string) ([]Record, error) {
 	endpoint := c.BaseURL.JoinPath("dns", "retrieve", domain)
 
-	respBody, err := c.do(ctx, endpoint, nil)
+	respBody, err := c.Do(ctx, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +168,7 @@ func (c *Client) RetrieveRecords(ctx context.Context, domain string) ([]Record, 
 func (c *Client) RetrieveSSLBundle(ctx context.Context, domain string) (SSLBundle, error) {
 	endpoint := c.BaseURL.JoinPath("ssl", "retrieve", domain)
 
-	respBody, err := c.do(ctx, endpoint, nil)
+	respBody, err := c.Do(ctx, endpoint, nil)
 	if err != nil {
 		return SSLBundle{}, err
 	}
@@ -185,47 +186,58 @@ func (c *Client) RetrieveSSLBundle(ctx context.Context, domain string) (SSLBundl
 	return bundleResp.SSLBundle, nil
 }
 
-func (c *Client) do(ctx context.Context, endpoint *url.URL, apiRequest interface{}) ([]byte, error) {
+func (c *Client) Do(ctx context.Context, endpoint *url.URL, apiRequest interface{}) ([]byte, error) {
 	request := authRequest{
 		APIKey:       c.apiKey,
 		SecretAPIKey: c.secretAPIKey,
 		apiRequest:   apiRequest,
 	}
 
+	slog.DebugContext(ctx, "request", "endpoint", endpoint.String(), "request", slog.AnyValue(request))
+
 	reqBody, err := json.Marshal(request)
 	if err != nil {
+		slog.ErrorContext(ctx, "failed to marshal request body", "error", err)
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(reqBody))
 	if err != nil {
+		slog.ErrorContext(ctx, "failed to create request", "error", err)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		slog.ErrorContext(ctx, "failed to call API", "error", err)
 		return nil, fmt.Errorf("failed to call API: %w", err)
 	}
+	slog.DebugContext(ctx, "response", "response", resp)
 
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		slog.ErrorContext(ctx, "failed to read response body", "error", err)
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
+	slog.DebugContext(ctx, "response", "code", resp.StatusCode, "body", string(respBody))
 
 	switch resp.StatusCode {
 	case http.StatusOK:
+		slog.DebugContext(ctx, "response", "body", string(respBody))
 		return respBody, nil
 
 	case http.StatusServiceUnavailable:
 		// related to https://github.com/nrdcg/porkbun/issues/5
+		slog.ErrorContext(ctx, "server error", "status", resp.StatusCode, "body", string(respBody))
 		return nil, &ServerError{
 			StatusCode: resp.StatusCode,
 			Message:    http.StatusText(http.StatusServiceUnavailable),
 		}
 
 	default:
+		slog.ErrorContext(ctx, "server error", "status", resp.StatusCode, "body", string(respBody))
 		return nil, &ServerError{
 			StatusCode: resp.StatusCode,
 			Message:    string(respBody),
