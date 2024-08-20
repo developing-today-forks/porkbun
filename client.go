@@ -28,6 +28,7 @@ type Client struct {
 
 	BaseURL    *url.URL
 	HTTPClient *http.Client
+	Logger     *slog.Logger
 }
 
 // New creates a new Client.
@@ -39,6 +40,7 @@ func New(secretAPIKey, apiKey string) *Client {
 		apiKey:       apiKey,
 		BaseURL:      baseURL,
 		HTTPClient:   &http.Client{Timeout: 10 * time.Second},
+		Logger:       slog.Default(),
 	}
 }
 
@@ -193,7 +195,7 @@ func (c *Client) Do(ctx context.Context, endpoint *url.URL, apiRequest interface
 		apiRequest:   apiRequest,
 	}
 
-	slog.DebugContext(ctx, "request", "endpoint", endpoint.String(), "request", slog.AnyValue(request))
+	c.Logger.DebugContext(ctx, "request", "endpoint", endpoint.String(), "request", slog.AnyValue(request))
 
 	reqBody, err := json.Marshal(request)
 	if err != nil {
