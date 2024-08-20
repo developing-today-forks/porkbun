@@ -195,51 +195,49 @@ func (c *Client) Do(ctx context.Context, endpoint *url.URL, apiRequest interface
 		apiRequest:   apiRequest,
 	}
 
-	c.Logger.DebugContext(ctx, "request", "endpoint", endpoint.String(), "request", slog.AnyValue(request))
-
 	reqBody, err := json.Marshal(request)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to marshal request body", "error", err)
+		slog.ErrorContext(ctx, "failed to marshal request body", slog.String("err", fmt.Sprintf("%v", err)))
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(reqBody))
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to create request", "error", err)
+		slog.ErrorContext(ctx, "failed to create request", slog.String("err", fmt.Sprintf("%v", err)))
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to call API", "error", err)
+		slog.ErrorContext(ctx, "failed to call API", slog.String("err", fmt.Sprintf("%v", err)))
 		return nil, fmt.Errorf("failed to call API: %w", err)
 	}
-	slog.DebugContext(ctx, "response", "response", resp)
+	slog.DebugContext(ctx, "resp", slog.String("response", fmt.Sprintf("%+v", resp)))
 
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to read response body", "error", err)
+		slog.ErrorContext(ctx, "failed to read response body", slog.String("err", fmt.Sprintf("%v", err)))
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-	slog.DebugContext(ctx, "response", "code", resp.StatusCode, "body", string(respBody))
+	slog.DebugContext(ctx, "respBody", slog.String("code", strconv.Itoa(resp.StatusCode)), slog.String("body", string(respBody)))
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		slog.DebugContext(ctx, "response", "body", string(respBody))
+		slog.DebugContext(ctx, "response", slog.String("body", string(respBody)))
 		return respBody, nil
 
 	case http.StatusServiceUnavailable:
 		// related to https://github.com/nrdcg/porkbun/issues/5
-		slog.ErrorContext(ctx, "server error", "status", resp.StatusCode, "body", string(respBody))
+		slog.ErrorContext(ctx, "server error", slog.String("status", strconv.Itoa(resp.StatusCode)), slog.String("body", string(respBody)))
 		return nil, &ServerError{
 			StatusCode: resp.StatusCode,
 			Message:    http.StatusText(http.StatusServiceUnavailable),
 		}
 
 	default:
-		slog.ErrorContext(ctx, "server error", "status", resp.StatusCode, "body", string(respBody))
+		slog.ErrorContext(ctx, "server error", slog.String("status", strconv.Itoa(resp.StatusCode)), slog.String("body", string(respBody)))
 		return nil, &ServerError{
 			StatusCode: resp.StatusCode,
 			Message:    string(respBody),
